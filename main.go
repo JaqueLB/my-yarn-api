@@ -2,16 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 var db = make(map[string]Yarn)
@@ -35,17 +37,17 @@ func init() {
 }
 
 type Yarn struct {
-	ID          string    `json:"_id`
-	Color       *Color    `json:"color"`
-	Brand       string    `json:"brand"`
-	Name        string    `json:"name"`
-	KnitNeedle  *Hook     `json:"knit_needle"`
-	CrochetHook *Hook     `json:"crochet_hook"`
-	Tex         int       `json:"tex"`
-	Length      int       `json:"length"`
-	Weight      int       `json:"weight"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          primitive.ObjectID `bson:"_id"`
+	Color       *Color             `json:"color"`
+	Brand       string             `json:"brand"`
+	Name        string             `json:"name"`
+	KnitNeedle  *Hook              `json:"knit_needle"`
+	CrochetHook *Hook              `json:"crochet_hook"`
+	Tex         int                `json:"tex"`
+	Length      int                `json:"length"`
+	Weight      int                `json:"weight"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 }
 
 type Color struct {
@@ -55,11 +57,6 @@ type Color struct {
 
 type Hook struct {
 	Sizes []float32 `json:"sizes"`
-}
-
-func createYarn(yarn *Yarn) error {
-	_, err := collection.InsertOne(ctx, yarn)
-	return err
 }
 
 func setupRouter() *gin.Engine {
@@ -73,51 +70,95 @@ func setupRouter() *gin.Engine {
 	yarns := r.Group("/yarns")
 
 	yarns.GET("/", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"all": db})
+		var results []*Yarn
+		col, err := collection.Find(context.TODO(), bson.D{{}})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			return
+		}
+		for col.Next(context.TODO()) {
+			var elem Yarn
+			err := col.Decode(&elem)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+				return
+			}
+
+			results = append(results, &elem)
+		}
+		if err := col.Err(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			return
+		}
+
+		// Close the cursor once finished
+		col.Close(context.TODO())
+		c.JSON(http.StatusOK, gin.H{"yarns": results})
 	})
 
-	yarns.GET("/:name", func(c *gin.Context) {
+	yarns.GET("/:uuid", func(c *gin.Context) {
 		var result *Yarn
-		filter := bson.D{{"name", c.Params.ByName("name")}}
+		filter := bson.D{{"id", c.Params.ByName("uuid")}}
 		err := collection.FindOne(context.TODO(), filter).Decode(&result)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"search": filter, "status": "no value"})
+			c.JSON(http.StatusNotFound, gin.H{"search": filter, "status": "no value"})
+			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"search": c.Params, "value": result})
+		c.JSON(http.StatusOK, gin.H{"search": c.Params, "value": result})
 	})
 
 	yarns.PATCH("/:uuid", func(c *gin.Context) {
-		uuid := c.Params.ByName("uuid")
-		var body *Yarn
-		_, ok := db[uuid]
-		if ok && c.Bind(&body) == nil {
-			db[uuid] = *body
+		updatedAt := time.Now()
+		filter := bson.D{{"id", c.Params.ByName("uuid")}}
+		requestData, err := c.GetRawData()
+		var m map[string]interface{}
+		err = json.Unmarshal(requestData, &m)
+		m["updated_at"] = updatedAt
+		newData, err := json.Marshal(m)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		updateData := bson.D{}
+		bson.UnmarshalExtJSON(newData, true, &updateData)
+		update := bson.D{{"$set", updateData}}
+		updateResponse, err := collection.UpdateOne(context.TODO(), filter, update)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"found":   updateResponse.MatchedCount,
+			"updated": updateResponse.ModifiedCount,
+		})
 	})
 
 	yarns.POST("/", func(c *gin.Context) {
-		var yarn *Yarn
-		err := c.Bind(&yarn)
+		now := time.Now()
+		requestData, err := c.GetRawData()
+		var m map[string]interface{}
+		err = json.Unmarshal(requestData, &m)
+		m["created_at"] = now
+		m["updated_at"] = now
+		m["id"] = uuid.NewString()
+		newData, err := json.Marshal(m)
+
+		_, err = collection.InsertOne(ctx, newData)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err})
-		}
-
-		yarn.ID = uuid.NewString()
-		yarn.CreatedAt = time.Now()
-		yarn.UpdatedAt = time.Now()
-
-		err = createYarn(yarn)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
 	yarns.DELETE("/:uuid", func(c *gin.Context) {
-		uuid := c.Params.ByName("uuid")
-		delete(db, uuid)
+		_, err := collection.DeleteOne(context.TODO(), bson.D{{"id", c.Params.ByName("uuid")}})
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
