@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  api:
+    image: golang:alpine
+    working_dir: "/app"
+    command: "go run main.go"
+    volumes:
+      - .:/app
+      - godata:/go
+    depends_on:
+      - mongo
+    ports:
+      - 8080:8080
+
+  mongo:
+    image: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+    volumes:
+      - mongodb:/data/db
+
+
+volumes:
+  mongodb: {}
+  godata: {}

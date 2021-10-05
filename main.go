@@ -22,7 +22,7 @@ var collection *mongo.Collection
 var ctx = context.TODO()
 
 func init() {
-	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017/")
+	clientOptions := options.Client().ApplyURI("mongodb://mongo:27017/")
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatal(err)
@@ -38,25 +38,25 @@ func init() {
 
 type Yarn struct {
 	ID          primitive.ObjectID `bson:"_id"`
-	Color       *Color             `json:"color"`
-	Brand       string             `json:"brand"`
-	Name        string             `json:"name"`
-	KnitNeedle  *Hook              `json:"knit_needle"`
-	CrochetHook *Hook              `json:"crochet_hook"`
-	Tex         int                `json:"tex"`
-	Length      int                `json:"length"`
-	Weight      int                `json:"weight"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
+	Color       *Color             `json:"color, omitempty"`
+	Brand       string             `json:"brand, omitempty"`
+	Name        string             `json:"name, omitempty"`
+	KnitNeedle  *Hook              `json:"knit_needle, omitempty"`
+	CrochetHook *Hook              `json:"crochet_hook, omitempty"`
+	Tex         int                `json:"tex, omitempty"`
+	Length      int                `json:"length, omitempty"`
+	Weight      int                `json:"weight, omitempty"`
+	CreatedAt   time.Time          `json:"created_at, omitempty"`
+	UpdatedAt   time.Time          `json:"updated_at, omitempty"`
 }
 
 type Color struct {
-	Name string `json:"name"`
-	Code string `json:"code"`
+	Name string `json:"name, omitempty"`
+	Code string `json:"code, omitempty"`
 }
 
 type Hook struct {
-	Sizes []float32 `json:"sizes"`
+	Sizes []float32 `json:"sizes, omitempty"`
 }
 
 func setupRouter() *gin.Engine {
